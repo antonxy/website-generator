@@ -22,6 +22,9 @@ def readInfoFile(path):
                d[res.groups()[0]] = res.groups()[1]
     return d
 
+def lang_specific_info_key(key, lang):
+    return key + "-" + lang if lang is not None else key
+
 
 class Structure(object):
     def __init__(self):
@@ -68,6 +71,9 @@ class Structure(object):
                 return None
         return page
 
+    def getIndexPage(self):
+        return self.getPageByPath(["index"])
+
     def printMenu(self, lang, filed, current_page=None):
         def visible_policy(page):
             if not page.visible():
@@ -109,7 +115,6 @@ class Structure(object):
             print("</li>", file=filed)
         print('<ul class="menu">', file=filed)
         # Show children of root page on level 0
-        recurse(self.root_page, 0, False)
         root_visible_children = [x for x in self.root_page.children if visible_policy(x)]
         for p in root_visible_children:
             recurse(p, 0, True)
@@ -139,16 +144,16 @@ class Page(object):
         self.children = sorted(self.children, key=getKey)
 
     def title(self, lang):
-        return self.info['title-' + lang]
+        return self.info[lang_specific_info_key('title', lang)]
 
     def menuTitle(self, lang):
-        if 'menutitle-' + lang in self.info:
-            return self.info['menutitle-' + lang]
+        if lang_specific_info_key('menutitle', lang) in self.info:
+            return self.info[lang_specific_info_key('menutitle', lang)]
         else:
-            return self.info['title-' + lang]
+            return self.info[lang_specific_info_key('title', lang)]
 
     def urlPart(self, lang):
-        return self.info['url-' + lang]
+        return self.info[lang_specific_info_key('url', lang)]
 
     def pathPart(self):
         splitName = os.path.basename(self.path).split('+', maxsplit=1)
@@ -167,7 +172,10 @@ class Page(object):
         return url
 
     def url(self, lang):
-        return '/' + lang + self._url_no_lang(lang) + '.html'
+        if lang is not None:
+            return '/' + lang + self._url_no_lang(lang) + '.html'
+        else:
+            return self._url_no_lang(lang) + '.html'
 
     def printLink(self, filed, lang, text=None):
         if text is None:
@@ -176,7 +184,8 @@ class Page(object):
 
     def printContent(self, lang, filed):
         template_regex = re.compile(r'{{([^}]*)}}')
-        with open(os.path.join(self.path, lang+'.html'), 'r', encoding='utf-8') as content_file:
+        content_file_name = lang+'.html' if lang is not None else 'page.html'
+        with open(os.path.join(self.path, content_file_name), 'r', encoding='utf-8') as content_file:
             for line in content_file.readlines():
                 line_matches = template_regex.finditer(line)
                 last_end = 0
@@ -193,6 +202,8 @@ class Page(object):
                         else:
                             filed.write(href_page.url(lang))
                     else:
+                        print("In page ", self.path, " - language: ", lang, file=sys.stderr)
+                        print("Undefined tag ", key, file=sys.stderr)
                         filed.write('Undefined')
                     last_end = line_match.end()
                 filed.write(line[last_end:len(line)])
@@ -209,7 +220,9 @@ class Page(object):
 
 
 def generatePage(structure, page, lang, root_dir, url = None):
-    filename = root_dir + (page.url(lang) if url is None else url)
+    url = page.url(lang) if url is None else url
+    filename = root_dir + url
+    print("Generating page {}".format(filename), file=sys.stderr)
     dirname = os.path.dirname(filename)
     if not os.path.exists(dirname):
         os.makedirs(dirname)
@@ -232,6 +245,7 @@ def generatePage(structure, page, lang, root_dir, url = None):
                         print(page.title(lang), file=filed)
                     else:
                         filed.write('Undefined')
+                        print("Undefined tag ", key, " in template", file=sys.stderr)
                     filed.write(line[line_match.end():len(line)])
                 else:
                     filed.write(line)
@@ -262,9 +276,13 @@ if __name__ == '__main__':
         for c in page.children:
             recurse_pages(c)
 
-    recurse_pages(structure.root_page)
+    #Root should not be visible so only generate children
+    for page in structure.root_page.children:
+        recurse_pages(page)
+
     #Index with default language
-    generatePage(structure, structure.root_page, config.default_language, out_dir, url='/index.html')
+    if config.default_language is not None:
+        generatePage(structure, structure.getIndexPage(), config.default_language, out_dir, url='/index.html')
 
     #Copy static content
     src = os.path.join(root_path, 'content/static')
