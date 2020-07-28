@@ -229,7 +229,9 @@ def generatePage(structure, page, lang, root_dir, url = None):
                     elif key == 'languages':
                         page.printLanguages(filed)
                     elif key == 'title':
-                        print(page.title(lang), file=filed)
+                        print(page.title(lang), file=filed, end="")
+                    elif key == 'language-code':
+                        print(lang, file=filed, end="")
                     else:
                         filed.write('Undefined')
                     filed.write(line[line_match.end():len(line)])
