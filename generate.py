@@ -5,6 +5,14 @@ import sys
 import os
 import shutil
 import argparse
+import click
+import jinja2
+from jinja2 import Environment, FileSystemLoader
+import http.server
+import socketserver
+import tempfile
+from PIL import Image
+from resizeimage import resizeimage
 
 root_path = os.path.join(sys.path[0], '..')
 sys.path.insert(1, root_path)
@@ -238,12 +246,134 @@ def generatePage(structure, page, lang, root_dir, url = None):
                 else:
                     filed.write(line)
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--out_dir", help="Directory the generated pages will be put into")
-    args = parser.parse_args()
+
+
+from jinja2 import BaseLoader, TemplateNotFound
+
+class DirectLoader(BaseLoader):
+
+    def __init__(self):
+        pass
+
+    def get_source(self, environment, template):
+        path = template
+        if not os.path.exists(path):
+            raise TemplateNotFound(template)
+        mtime = os.path.getmtime(path)
+        with open(path, 'r', encoding='utf-8') as f:
+            source = "{% extends 'base.html' %}{% block content %}" + f.read() + "{% endblock %}"
+        return source, path, lambda: mtime == os.path.getmtime(path)
+
+
+@click.command()
+@click.option("--port", default=5000)
+def serve(port):
+    env = Environment(loader=FileSystemLoader(['templates']))
+    loader = DirectLoader()
+
     structure = Structure()
-    out_dir = args.out_dir if args.out_dir else '/var/www/html'
+
+    with tempfile.TemporaryDirectory() as out_dir:
+        print(f"Serving pages from {out_dir}")
+
+        src = 'content/static'
+        src_files = os.listdir(src)
+        for file_name in src_files:
+            full_file_name = os.path.join(src, file_name)
+            full_dest_name = os.path.join(out_dir, file_name)
+            if (os.path.isfile(full_file_name)):
+                shutil.copy(full_file_name, out_dir)
+            else:
+                shutil.copytree(full_file_name, full_dest_name)
+
+        def generate_image(path, width, max_width=None):
+            '''
+            Generates an image with the specified width and returns its path.
+            If max_width is specified and the width of the input image
+            is smaller than max_width the image is not modified.
+            '''
+            print(f"generate_image {path} {width}")
+            new_name = os.path.splitext(path)[0] + "-" + str(width) + os.path.splitext(path)[1]
+            with open(out_dir + path, 'r+b') as f:
+                with Image.open(f) as image:
+                    if max_width is not None and image.width < max_width:
+                        return path
+                    img = resizeimage.resize_width(image, width, validate=False)
+                    img.save(out_dir + new_name, image.format)
+            return new_name
+
+        env.globals['generate_image'] = generate_image
+
+        def generate_link(path, lang):
+            print(f"generate_link {path}")
+            params = path.split("/")
+            href_page = structure.getPageByPath(params)
+            if href_page is None:
+                return jinja2.Undefined(name="href")
+            else:
+                return href_page.url(lang)
+
+        env.globals['generate_link'] = generate_link
+
+
+        def generate_page(page, lang):
+            template_path = os.path.join(page.path, lang+'.html')
+            page_path = page.url(lang)
+
+            filename = out_dir + page_path
+
+            print(f"generate_page {template_path} to {filename}")
+
+            template = loader.load(env, template_path, env.globals)
+
+            dirname = os.path.dirname(filename)
+            if not os.path.exists(dirname):
+                os.makedirs(dirname)
+            args = {
+                "title": "Testpage",
+                "language_code": lang,
+                "href": (lambda path: generate_link(path, lang))
+            }
+
+            with open(filename, "w") as fh:
+                fh.write(template.render(**args))
+
+        class Handler(http.server.SimpleHTTPRequestHandler):
+            '''
+            Handler checks if a request is for a known page.
+            If it is it regenerates the page before serving.
+            Afterwards it continues serving from the directory as usual
+            '''
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, directory=out_dir, **kwargs)
+
+            def send_head(self):
+                print(self.path)
+                if self.path.endswith(".html"):
+                    path = self.path[0:-5]
+                    print(f"Path without html '{path}'")
+                    values = path.split("/")[1:]
+                    lang = values[0]
+                    url = values[1:]
+
+                    page = structure.getPageByUrl(url, lang)
+                    if page is not None:
+                        #TODO Handle errors and send 500
+                        generate_page(page, lang)
+                return super().send_head()
+
+
+        socketserver.TCPServer.allow_reuse_address = True
+        with socketserver.TCPServer(("", port), Handler) as httpd:
+            print("serving at port", port)
+            httpd.serve_forever()
+
+@click.command()
+@click.option("--out_dir", prompt="Generate in folder")
+def generate(out_dir):
+    return
+    # TODO adapt to flask
+    structure = Structure()
 
     #Delete existing output
     if os.path.exists(out_dir):
@@ -278,3 +408,14 @@ if __name__ == '__main__':
             shutil.copy(full_file_name, out_dir)
         else:
             shutil.copytree(full_file_name, full_dest_name)
+
+@click.group()
+def cli():
+    pass
+
+cli.add_command(serve)
+cli.add_command(generate)
+
+if __name__ == '__main__':
+    cli()
+
