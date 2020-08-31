@@ -356,7 +356,7 @@ def serve(port):
             httpd.serve_forever()
 
 @click.command()
-@click.option("--out_dir")
+@click.option("--out_dir", required=True)
 def generate(out_dir):
     if out_dir.endswith("/"):
         out_dir = out_dir[0:-1]
