@@ -261,6 +261,10 @@ def check_exists(path, out_dir):
     else:
         return path
 
+def enumerate_folder(path, out_dir):
+    print(f"enumerate_folder {path}")
+    return sorted(os.listdir("content/static" + path))
+
 
 def generate_page(page, lang, structure, out_dir, url=None):
     template_path = os.path.join(page.path, lang+'.html')
@@ -276,7 +280,8 @@ def generate_page(page, lang, structure, out_dir, url=None):
     env.globals = {
         "href": functools.partial(generate_link, lang=lang, page=page),
         "generate_image": functools.partial(generate_image, out_dir=out_dir),
-        "check_exists": functools.partial(check_exists, out_dir=out_dir)
+        "check_exists": functools.partial(check_exists, out_dir=out_dir),
+        "enumerate_folder": functools.partial(enumerate_folder, out_dir=out_dir),
     }
     template = loader.load(env, template_path, env.globals)
 
