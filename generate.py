@@ -282,6 +282,7 @@ def generate_page(page, lang, structure, out_dir, url=None):
         "generate_image": functools.partial(generate_image, out_dir=out_dir),
         "check_exists": functools.partial(check_exists, out_dir=out_dir),
         "enumerate_folder": functools.partial(enumerate_folder, out_dir=out_dir),
+        "language_code": lang,
     }
     template = loader.load(env, template_path, env.globals)
 
@@ -297,7 +298,6 @@ def generate_page(page, lang, structure, out_dir, url=None):
 
     args = {
         "title": page.title(lang),
-        "language_code": lang,
         "menu": menu.getvalue(),
         "languages": languages.getvalue()
     }
